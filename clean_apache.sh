@@ -76,38 +76,42 @@ restart_apache() {
 remove_domain_vhosts() {
     print_info "Removing all domain virtual hosts..."
     
-    local count=0
-    # Remove all domain vhost files except default/system files
-    for vhost_file in "${APACHE_VHOSTS_DIR}"/*-vhost.conf "${APACHE_VHOSTS_DIR}"/*-https-vhost.conf; do
-        if [[ -f "$vhost_file" ]]; then
-            # Skip system files (like 00_status-vhost.conf)
-            if [[ "$(basename "$vhost_file")" =~ ^00_ ]]; then
-                continue
-            fi
-            print_info "Removing: $(basename "$vhost_file")"
-            sudo rm -f "$vhost_file"
-            ((count++))
-        fi
-    done
+    # Collect all files to remove
+    local files_to_remove=()
+    local backup_files=()
     
-    if [[ $count -eq 0 ]]; then
-        print_info "No domain virtual hosts found to remove"
+    # Find all domain vhost files (excluding system files like 00_*)
+    while IFS= read -r -d '' vhost_file; do
+        local filename=$(basename "$vhost_file")
+        # Skip system files (like 00_status-vhost.conf)
+        if [[ ! "$filename" =~ ^00_ ]]; then
+            files_to_remove+=("$vhost_file")
+        fi
+    done < <(find "${APACHE_VHOSTS_DIR}" -maxdepth 1 \( -name "*-vhost.conf" -o -name "*-https-vhost.conf" \) -type f -print0 2>/dev/null)
+    
+    # Find all backup files
+    while IFS= read -r -d '' backup_file; do
+        backup_files+=("$backup_file")
+    done < <(find "${APACHE_VHOSTS_DIR}" -maxdepth 1 \( -name "*.back.*" -o -name "*.backup" \) -type f -print0 2>/dev/null)
+    
+    # Remove all vhost files at once
+    if [[ ${#files_to_remove[@]} -gt 0 ]]; then
+        print_info "Removing ${#files_to_remove[@]} domain virtual host file(s)..."
+        printf "  %s\n" "${files_to_remove[@]}" | xargs -n1 basename | sed 's/^/  → /'
+        sudo rm -f "${files_to_remove[@]}"
+        print_success "Removed ${#files_to_remove[@]} domain virtual host file(s)"
     else
-        print_success "Removed $count domain virtual host file(s)"
+        print_info "No domain virtual hosts found to remove"
     fi
     
-    # Also remove any backup files
-    local backup_count=0
-    for backup_file in "${APACHE_VHOSTS_DIR}"/*.back.* "${APACHE_VHOSTS_DIR}"/*.backup; do
-        if [[ -f "$backup_file" ]]; then
-            print_info "Removing backup: $(basename "$backup_file")"
-            sudo rm -f "$backup_file"
-            ((backup_count++))
-        fi
-    done
-    
-    if [[ $backup_count -gt 0 ]]; then
-        print_success "Removed $backup_count backup file(s)"
+    # Remove all backup files at once
+    if [[ ${#backup_files[@]} -gt 0 ]]; then
+        print_info "Removing ${#backup_files[@]} backup file(s)..."
+        printf "  %s\n" "${backup_files[@]}" | xargs -n1 basename | sed 's/^/  → /'
+        sudo rm -f "${backup_files[@]}"
+        print_success "Removed ${#backup_files[@]} backup file(s)"
+    else
+        print_info "No backup files found to remove"
     fi
 }
 
@@ -131,29 +135,26 @@ clean_certificate_symlinks() {
     fi
 }
 
-# Function to clean certificate directories (optional)
+# Function to clean certificate directories
 clean_certificate_directories() {
-    print_warning "Certificate directories found in: $CERTS_DIR"
-    read -p "Do you want to remove all certificate directories? (y/N): " DELETE_CERTS
+    if [[ ! -d "$CERTS_DIR" ]]; then
+        print_info "Certificate directory does not exist"
+        return 0
+    fi
     
-    if [[ "$DELETE_CERTS" =~ ^[Yy]$ ]]; then
-        print_info "Removing all certificate directories..."
-        local count=0
-        for cert_dir in "$CERTS_DIR"/*; do
-            if [[ -d "$cert_dir" ]]; then
-                print_info "Removing: $(basename "$cert_dir")"
-                sudo rm -rf "$cert_dir"
-                ((count++))
-            fi
-        done
-        
-        if [[ $count -eq 0 ]]; then
-            print_info "No certificate directories found"
-        else
-            print_success "Removed $count certificate directory(ies)"
-        fi
+    # Collect all certificate directories
+    local cert_dirs=()
+    while IFS= read -r -d '' cert_dir; do
+        cert_dirs+=("$cert_dir")
+    done < <(find "$CERTS_DIR" -maxdepth 1 -mindepth 1 -type d -print0 2>/dev/null)
+    
+    if [[ ${#cert_dirs[@]} -gt 0 ]]; then
+        print_info "Removing ${#cert_dirs[@]} certificate director(ies)..."
+        printf "  %s\n" "${cert_dirs[@]}" | xargs -n1 basename | sed 's/^/  → /'
+        sudo rm -rf "${cert_dirs[@]}"
+        print_success "Removed ${#cert_dirs[@]} certificate director(ies)"
     else
-        print_info "Certificate directories kept intact"
+        print_info "No certificate directories found"
     fi
 }
 
@@ -290,10 +291,8 @@ main() {
     # Clean certificate symlinks
     clean_certificate_symlinks
     
-    # Clean certificate directories (optional)
-    if [[ -d "$CERTS_DIR" ]]; then
-        clean_certificate_directories
-    fi
+    # Clean certificate directories
+    clean_certificate_directories
     
     # Remove backup files
     remove_backup_files
