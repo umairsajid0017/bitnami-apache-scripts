@@ -132,6 +132,13 @@ EOF
     
     cat >> "$vhost_file" << EOF
   DocumentRoot ${DOMAIN_DIR}/${domain}
+
+   # Document root directory permissions
+  <Directory "${DOMAIN_DIR}/${domain}">
+    Options -Indexes +FollowSymLinks
+    AllowOverride All
+    Require all granted
+  </Directory>
   
   # Allow .well-known for ACME challenge (certbot)
   <Directory "${DOMAIN_DIR}/${domain}/.well-known">
@@ -143,7 +150,9 @@ EOF
   # Redirect all HTTP traffic to HTTPS (except .well-known for certbot)
   RewriteEngine On
   RewriteCond %{REQUEST_URI} !^/.well-known
-  RewriteRule ^(.*)$ https://%{SERVER_NAME}$1 [R=301,L]
+  RewriteCond %{HTTPS} off
+  RewriteCond %{HTTP:X-Forwarded-Proto} !https
+  RewriteRule ^(.*)$ https://$1 [R=301,L]
   
   # Logging
   ErrorLog "/opt/bitnami/apache/logs/${domain}-error.log"
