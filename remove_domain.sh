@@ -45,11 +45,14 @@ print_warning() {
     echo -e "${YELLOW}⚠ $1${NC}"
 }
 
-# Function to validate domain format
+# Function to validate domain format (supports domains and subdomains)
 validate_domain() {
     local domain="$1"
-    if [[ ! "$domain" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{1,61}[a-zA-Z0-9]\.[a-zA-Z]{2,}$ ]]; then
+    # Allow domains like: example.com, subdomain.example.com, www.subdomain.example.com, etc.
+    # Pattern: allows multiple labels separated by dots, each label 1-63 chars
+    if [[ ! "$domain" =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$ ]]; then
         print_error "Invalid domain format: $domain"
+        print_info "Valid examples: example.com, subdomain.example.com, www.example.com"
         return 1
     fi
     return 0

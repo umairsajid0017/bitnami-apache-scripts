@@ -47,11 +47,14 @@ print_warning() {
     echo -e "${YELLOW}⚠ $1${NC}"
 }
 
-# Function to validate domain format
+# Function to validate domain format (supports domains and subdomains)
 validate_domain() {
     local domain="$1"
-    if [[ ! "$domain" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{1,61}[a-zA-Z0-9]\.[a-zA-Z]{2,}$ ]]; then
+    # Allow domains like: example.com, subdomain.example.com, www.subdomain.example.com, etc.
+    # Pattern: allows multiple labels separated by dots, each label 1-63 chars
+    if [[ ! "$domain" =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$ ]]; then
         print_error "Invalid domain format: $domain"
+        print_info "Valid examples: example.com, subdomain.example.com, www.example.com"
         return 1
     fi
     return 0
@@ -109,10 +112,25 @@ create_http_vhost() {
     
     print_info "Creating HTTP redirect virtual host (port 80 -> 443)"
     
+    # Add www alias only for main domains (not subdomains)
+    # Main domain: example.com -> add www.example.com
+    # Subdomain: api.example.com -> no www alias
+    local www_alias=""
+    if [[ ! "$domain" =~ ^www\. ]] && [[ "$domain" =~ ^[^.]+\.([a-zA-Z]{2,})$ ]]; then
+        # Main domain (has only one dot before TLD), add www alias
+        www_alias="www.${domain}"
+    fi
+    
     cat > "$vhost_file" << EOF
 <VirtualHost 127.0.0.1:80 _default_:80>
   ServerName ${domain}
-  ServerAlias www.${domain}
+EOF
+    
+    if [[ -n "$www_alias" ]]; then
+        echo "  ServerAlias ${www_alias}" >> "$vhost_file"
+    fi
+    
+    cat >> "$vhost_file" << EOF
   DocumentRoot ${DOMAIN_DIR}/${domain}
   
   # Allow .well-known for ACME challenge (certbot)
@@ -145,10 +163,25 @@ create_https_vhost() {
     
     print_info "Creating HTTPS virtual host template"
     
+    # Add www alias only for main domains (not subdomains)
+    # Main domain: example.com -> add www.example.com
+    # Subdomain: api.example.com -> no www alias
+    local www_alias=""
+    if [[ ! "$domain" =~ ^www\. ]] && [[ "$domain" =~ ^[^.]+\.([a-zA-Z]{2,})$ ]]; then
+        # Main domain (has only one dot before TLD), add www alias
+        www_alias="www.${domain}"
+    fi
+    
     cat > "$vhost_file" << EOF
 <VirtualHost 127.0.0.1:443 _default_:443>
   ServerName ${domain}
-  ServerAlias www.${domain}
+EOF
+    
+    if [[ -n "$www_alias" ]]; then
+        echo "  ServerAlias ${www_alias}" >> "$vhost_file"
+    fi
+    
+    cat >> "$vhost_file" << EOF
   # SSL will be enabled after certificate installation by certbot
   SSLEngine off
   # Uncomment these lines after SSL certificate installation:
@@ -235,25 +268,45 @@ install_ssl() {
     print_info "Running certbot to obtain SSL certificate..."
     print_info "You may be prompted for email address."
     
+    # Determine which domains to request certificate for
+    local cert_domains=("$domain")
+    # Add www alias only for main domains (not subdomains)
+    if [[ ! "$domain" =~ ^www\. ]] && [[ "$domain" =~ ^[^.]+\.([a-zA-Z]{2,})$ ]]; then
+        # Main domain (has only one dot before TLD), also request www.example.com
+        cert_domains+=("www.$domain")
+    fi
+    
     # Use certbot with webroot plugin (doesn't modify Apache configs)
-    sudo "$CERTBOT_CMD" certonly \
-        --webroot \
-        --webroot-path="$domain_path" \
-        --email "${CERTBOT_EMAIL:-}" \
-        --agree-tos \
-        --no-eff-email \
-        --keep-until-expiring \
-        -d "$domain" \
-        -d "www.$domain" \
-        --non-interactive 2>/dev/null || {
-        
-        # If non-interactive fails, try interactive
+    local certbot_cmd_args=(
+        "$CERTBOT_CMD" certonly
+        --webroot
+        --webroot-path="$domain_path"
+        --email "${CERTBOT_EMAIL:-}"
+        --agree-tos
+        --no-eff-email
+        --keep-until-expiring
+    )
+    
+    # Add domain arguments
+    for cert_domain in "${cert_domains[@]}"; do
+        certbot_cmd_args+=(-d "$cert_domain")
+    done
+    
+    certbot_cmd_args+=(--non-interactive)
+    
+    sudo "${certbot_cmd_args[@]}" 2>/dev/null || {
+        # If non-interactive fails, try interactive (without email flags)
         print_info "Running certbot in interactive mode..."
-        sudo "$CERTBOT_CMD" certonly \
-            --webroot \
-            --webroot-path="$domain_path" \
-            -d "$domain" \
-            -d "www.$domain" || {
+        local certbot_cmd_interactive=(
+            "$CERTBOT_CMD" certonly
+            --webroot
+            --webroot-path="$domain_path"
+        )
+        for cert_domain in "${cert_domains[@]}"; do
+            certbot_cmd_interactive+=(-d "$cert_domain")
+        done
+        
+        sudo "${certbot_cmd_interactive[@]}" || {
             print_error "SSL certificate installation failed."
             return 1
         }
