@@ -166,7 +166,7 @@ test_apache_config() {
 # Function to restart Apache
 restart_apache() {
     print_info "Restarting Apache server"
-    if sudo "$APACHE_CTL" graceful 2>/dev/null || sudo systemctl restart apache2 2>/dev/null || sudo service apache2 restart 2>/dev/null; then
+    if sudo /opt/bitnami/ctlscript.sh restart apache 2>/dev/null; then
         print_success "Apache restarted successfully"
         return 0
     else
