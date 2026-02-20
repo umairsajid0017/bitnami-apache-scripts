@@ -14,6 +14,9 @@ log() { echo "[uninstall] $*"; }
 
 BITNAMI_HTTPD_CONF="/opt/bitnami/apache/conf/httpd.conf"
 BITNAMI_PROXY_CONF="/opt/bitnami/apache/conf/pgadmin4-proxy.conf"
+BITNAMI_BITNAMI_CONF="/opt/bitnami/apache/conf/bitnami/bitnami.conf"
+BITNAMI_PGADMIN_VHOST_SNIPPET="/opt/bitnami/apache/conf/bitnami/pgadmin4-default-vhost.conf"
+HTTPD_DEFAULT_CONF="/opt/bitnami/apache/conf/extra/httpd-default.conf"
 
 echo ""
 echo "=============================================="
@@ -85,16 +88,34 @@ if id postgres >/dev/null 2>&1; then
 fi
 
 ############################################
-# REMOVE BITNAMI PROXY CONFIG
+# REMOVE BITNAMI pgAdmin CONFIG
 ############################################
-if [ -f "$BITNAMI_PROXY_CONF" ]; then
-  log "Removing Bitnami pgAdmin proxy config"
-  rm -f "$BITNAMI_PROXY_CONF"
+# Remove default-vhost snippet and its Include from bitnami.conf
+if [ -f "$BITNAMI_PGADMIN_VHOST_SNIPPET" ]; then
+  log "Removing Bitnami pgAdmin vhost snippet"
+  rm -f "$BITNAMI_PGADMIN_VHOST_SNIPPET"
+fi
+if [ -f "$BITNAMI_BITNAMI_CONF" ]; then
+  log "Cleaning Bitnami default vhost Include"
+  sed -i '/pgadmin4-default-vhost\.conf/d' "$BITNAMI_BITNAMI_CONF" || true
 fi
 
+# Remove proxy/limits config and its Include from httpd.conf
+if [ -f "$BITNAMI_PROXY_CONF" ]; then
+  log "Removing Bitnami pgAdmin proxy/limits config"
+  rm -f "$BITNAMI_PROXY_CONF"
+fi
 if [ -f "$BITNAMI_HTTPD_CONF" ]; then
   log "Cleaning Bitnami httpd.conf include"
   sed -i '/pgadmin4-proxy\.conf/d' "$BITNAMI_HTTPD_CONF" || true
+fi
+
+# Remove LimitRequest lines we added to httpd-default.conf
+if [ -f "$HTTPD_DEFAULT_CONF" ]; then
+  log "Removing pgAdmin LimitRequest lines from httpd-default.conf"
+  sed -i '/# pgAdmin: allow larger request headers/d' "$HTTPD_DEFAULT_CONF" || true
+  sed -i '/^LimitRequestLine 32768$/d' "$HTTPD_DEFAULT_CONF" || true
+  sed -i '/^LimitRequestFieldSize 32768$/d' "$HTTPD_DEFAULT_CONF" || true
 fi
 
 ############################################
