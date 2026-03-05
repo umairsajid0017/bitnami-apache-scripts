@@ -18,7 +18,6 @@ certbot certonly \
   --webroot \
   --webroot-path="$DOMAIN_DIR" \
   -d "$DOMAIN" \
-  -d "www.$DOMAIN" \
   --quiet
 
 mkdir -p "$CERTS_DIR"
